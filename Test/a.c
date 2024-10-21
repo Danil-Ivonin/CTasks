@@ -11,7 +11,7 @@ int main(int argc, char **argv)
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	
     MPI_Finalize();
-	printf("Process: %d, size: %d\n", rank, size);
+	printf("Thread: %d, size: %d\n", rank, size);
 	
 	return 0;
 }
