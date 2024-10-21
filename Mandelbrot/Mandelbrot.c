@@ -80,9 +80,7 @@ int main(int argc, char* argv[])
     //Start acync part
     MPI_Barrier(MPI_COMM_WORLD);
 
-    printf("Data on thread %d:\n", rank);
-    printf("maxiter = %d, xres = %d, yres = %d\n", maxiter, xres, yres);
-    printf("xmin = %f, xmax = %f, ymin = %f, ymax = %f\n", xmin, xmax, ymin, ymax);
+    tstart = MPI_Wtime();
 
     int start_y = rank * chunk_size;
     int end_y = (rank+1) * chunk_size - 1;
@@ -90,7 +88,6 @@ int main(int argc, char* argv[])
         end_y = yres - 1;
 
     int calc_size = xres * (end_y - start_y + 1);
-    printf("chunk_y = %d, calc_size = %d\n\n", chunk_size, calc_size);
 
     pixel_t* image = (pixel_t *)malloc(calc_size * sizeof(pixel_t));
     //init black image
@@ -101,9 +98,6 @@ int main(int argc, char* argv[])
         image[i].blue = 0;
     }
 
-
-    printf("Start calc data at %d:\nX : %d -> %d\nY : %d -> %d\nCalc size = %d, Chunk_y = %d\n\n", 
-    rank, 0, xres, start_y, end_y, calc_size, chunk_size);
     double x, y; /* Coordinates of the current point in the complex plane. */
     double u, v; /* Coordinates of the iterated point. */
     int i,j; /* Pixel counters */
@@ -150,9 +144,9 @@ int main(int argc, char* argv[])
             };
         }
     }
-    printf("Fill send arr\n");
+
     int* send_arr = (int*)malloc(calc_size * sizeof(int) * 3);
-    printf("Send arr size = %d\n\n", calc_size * 3);
+
     for (int i = 0; i < calc_size; i++)
     {
         send_arr[3 * i]     = image[i].red;
@@ -162,19 +156,18 @@ int main(int argc, char* argv[])
 
     int* recv_arr;
     const int recv_arr_size = xres * yres * 3;
-    printf("Recv arr size = %d\n", recv_arr_size);
     if(rank == 0)
     {
         recv_arr = (int*)malloc(recv_arr_size * sizeof(int));
     }
-    printf("Start mpi gather\n\n");
+
     MPI_Gather(send_arr, calc_size * 3, MPI_INT, recv_arr, calc_size * 3, MPI_INT, 0, MPI_COMM_WORLD);
-    //recv_arr = send_arr;
+
     if(rank == 0)
     {
-        /* Open the file and write the header. */
+        //Open the file and write the header
         FILE * fp = fopen("pic.ppm","wb");
-        /*write ASCII header to the file*/
+        //write ASCII header to the file
         fprintf(fp, "P3\n# Mandelbrot, xmin=%lf, xmax=%lf, ymin=%lf, ymax=%lf, maxiter=%d\n%d %d\n%d\n",
             xmin, xmax, ymin, ymax, maxiter,
             xres, yres, maxiter);
@@ -186,6 +179,16 @@ int main(int argc, char* argv[])
         }
         fclose(fp);
     }
+
+    //--------------------------------------
+    //Time calculation
+    tend = MPI_Wtime();
+    if (rank == 0)
+    {
+        double time_taken_parallel = tend - tstart;
+        printf("Time taken parallel = %f for:\nimage size = %dx%d\ncalc depth = %d", time_taken_parallel, xres, yres, maxiter);
+    }
+
     MPI_Finalize();
     return 0;
 }
