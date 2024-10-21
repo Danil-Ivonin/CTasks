@@ -25,7 +25,7 @@ int main(int argc, char* argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     
     /* Parse the command line arguments. */
-    if (argc != 7) 
+    if (argc != 7 && rank == 0) 
     {
         printf("Usage:   %s <xmin> <xmax> <ymin> <ymax> <maxiter> <res>\n", argv[0]);
         printf("Example: %s 0.27085 0.27100 0.004640 0.004810 1000 1024\n", argv[0]);
@@ -47,6 +47,7 @@ int main(int argc, char* argv[])
 
     printf("Data:\nxmin = %f, xmax = %f, xres = %d\n", xmin, xmax, xres);
     printf("ymin = %f, ymax = %f, yres = %d\n", ymin, ymax, yres);
+    printf("img size = %d\n", (xres * yres));
     printf("max iter = %d\n\n", maxiter);
 
     int chunk_y = ceil((double)yres / size);
@@ -56,6 +57,8 @@ int main(int argc, char* argv[])
         end_y = yres - 1;
 
     int calc_size = xres * chunk_y;
+
+    printf("chunk_y = %d, calc_size = %d at thred %d\n", chunk_y, calc_size, rank);
     pixel_t* image = (pixel_t *)malloc(calc_size * sizeof(pixel_t));
     for (int i = 0; i < calc_size; i++)
     {
@@ -145,7 +148,7 @@ int main(int argc, char* argv[])
                 xres, yres, 256);
 
         
-        for (int i = 0; i < recv_arr_size; i+3)
+        for (int i = 0; i < recv_arr_size; i+=3)
         {
             fprintf(fp, "%d %d %d\n", recv_arr[i], recv_arr[i + 1], recv_arr[i + 2]);
         }
