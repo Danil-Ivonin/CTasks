@@ -6,9 +6,9 @@
 
 typedef struct
 {
-    uint8_t red;
-    uint8_t green;
-    uint8_t blue;
+    int red;
+    int green;
+    int blue;
 }
 pixel_t;
 
@@ -20,46 +20,76 @@ int main(int argc, char* argv[])
 {
     int rank, size;
     double tstart, tend;
+
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     
-    /* Parse the command line arguments. */
-    if (argc != 7 && rank == 0) 
+    int maxiter, xres, yres, chunk_size;
+    double xmin, xmax, ymin, ymax, dx, dy;
+
+    //------------------------------------
+    // Parse the command line arguments
+    if (rank == 0) 
     {
-        printf("Usage:   %s <xmin> <xmax> <ymin> <ymax> <maxiter> <res>\n", argv[0]);
-        printf("Example: %s 0.27085 0.27100 0.004640 0.004810 1000 1024\n", argv[0]);
-        exit(EXIT_FAILURE);
+        if (argc != 7)
+        {
+            printf("Usage:   %s <xmin> <xmax> <ymin> <ymax> <maxiter> <res>\n", argv[0]);
+            printf("Example: %s 0.27085 0.27100 0.004640 0.004810 1000 1024\n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+        
+        //Get user input data
+        xmin = atof(argv[1]);
+        xmax = atof(argv[2]);
+        ymin = atof(argv[3]);
+        ymax = atof(argv[4]);
+
+        maxiter = (unsigned short)atoi(argv[5]);
+
+        //Image size, width is given, height is computed
+        xres = atoi(argv[6]);
+        yres = (xres*(ymax-ymin))/(xmax-xmin);
+
+
+        // Precompute pixel width and height
+        dx = (xmax-xmin)/xres;
+        dy = (ymax-ymin)/yres;
+
+        printf("Data:\nxmin = %f, xmax = %f, xres = %d\n", xmin, xmax, xres);
+        printf("ymin = %f, ymax = %f, yres = %d\n", ymin, ymax, yres);
+        printf("dx = %f, dy = %f\n", dx, dy);
+        printf("img size = %d\n", (xres * yres));
+        printf("max iter = %d\n\n", maxiter);
+
+        chunk_size = ceil((double)yres / size);
+
+        MPI_Bcast(&maxiter, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&xres, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&yres, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&chunk_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&xmin, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&xmax, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&ymin, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&ymax, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&dx, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&dy, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     }
 
-    /* The window in the plane. */
-    const double xmin = atof(argv[1]);
-    const double xmax = atof(argv[2]);
-    const double ymin = atof(argv[3]);
-    const double ymax = atof(argv[4]);
+    //-----------------------------------------
+    //Start acync part
+    MPI_Barrier(MPI_COMM_WORLD);
 
-    /* Maximum number of iterations*/
-    const int maxiter = (unsigned short)atoi(argv[5]);
-
-    /* Image size, width is given, height is computed. */
-    const int xres = atoi(argv[6]);
-    const int yres = (xres*(ymax-ymin))/(xmax-xmin);
-
-    printf("Data:\nxmin = %f, xmax = %f, xres = %d\n", xmin, xmax, xres);
-    printf("ymin = %f, ymax = %f, yres = %d\n", ymin, ymax, yres);
-    printf("img size = %d\n", (xres * yres));
-    printf("max iter = %d\n\n", maxiter);
-
-    int chunk_y = ceil((double)yres / size);
-    int start_y = rank * chunk_y;
-    int end_y = (rank+1) * chunk_y - 1;
+    int start_y = rank * chunk_size;
+    int end_y = (rank+1) * chunk_size - 1;
     if (end_y > yres)
         end_y = yres - 1;
 
-    int calc_size = xres * chunk_y;
+    int calc_size = xres * (end_y - start_y + 1);
+    printf("chunk_y = %d, calc_size = %d at thred %d\n", chunk_size, calc_size, rank);
 
-    printf("chunk_y = %d, calc_size = %d at thred %d\n", chunk_y, calc_size, rank);
     pixel_t* image = (pixel_t *)malloc(calc_size * sizeof(pixel_t));
+    //init black image
     for (int i = 0; i < calc_size; i++)
     {
         image[i].red = 0;
@@ -67,11 +97,9 @@ int main(int argc, char* argv[])
         image[i].blue = 0;
     }
 
-    /* Precompute pixel width and height. */
-    double dx=(xmax-xmin)/xres;
-    double dy=(ymax-ymin)/yres;
-    printf("Start calc data at %d:\nX : %d -> %d\nY : %d -> %d\nCalc size = %d, Chunk_y = %d\n\ns", 
-    rank, 0, xres, start_y, end_y, calc_size, chunk_y);
+
+    printf("Start calc data at %d:\nX : %d -> %d\nY : %d -> %d\nCalc size = %d, Chunk_y = %d\n\n", 
+    rank, 0, xres, start_y, end_y, calc_size, chunk_size);
     double x, y; /* Coordinates of the current point in the complex plane. */
     double u, v; /* Coordinates of the iterated point. */
     int i,j; /* Pixel counters */
@@ -98,7 +126,7 @@ int main(int argc, char* argv[])
             /* compute  pixel color and write it to file */
             if (k < maxiter) 
             {
-                int index = (j * xres) + i;
+                int index = (j * (xres - start_y)) + i;
                 /* exterior */
                 if (k > 0)
                 {
