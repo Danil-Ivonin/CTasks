@@ -63,22 +63,26 @@ int main(int argc, char* argv[])
         printf("max iter = %d\n\n", maxiter);
 
         chunk_size = ceil((double)yres / size);
-
-        MPI_Bcast(&maxiter, 1, MPI_INT, 0, MPI_COMM_WORLD);
-        MPI_Bcast(&xres, 1, MPI_INT, 0, MPI_COMM_WORLD);
-        MPI_Bcast(&yres, 1, MPI_INT, 0, MPI_COMM_WORLD);
-        MPI_Bcast(&chunk_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
-        MPI_Bcast(&xmin, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        MPI_Bcast(&xmax, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        MPI_Bcast(&ymin, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        MPI_Bcast(&ymax, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        MPI_Bcast(&dx, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        MPI_Bcast(&dy, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     }
+
+    MPI_Bcast(&maxiter, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&xres, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&yres, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&chunk_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&xmin, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&xmax, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&ymin, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&ymax, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&dx, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&dy, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     //-----------------------------------------
     //Start acync part
     MPI_Barrier(MPI_COMM_WORLD);
+
+    printf("Data on thread %d:\n", rank);
+    printf("maxiter = %d, xres = %d, yres = %d\n", maxiter, xres, yres);
+    printf("xmin = %f, xmax = %f, ymin = %f, ymax = %f\n", xmin, xmax, ymin, ymax);
 
     int start_y = rank * chunk_size;
     int end_y = (rank+1) * chunk_size - 1;
@@ -86,7 +90,7 @@ int main(int argc, char* argv[])
         end_y = yres - 1;
 
     int calc_size = xres * (end_y - start_y + 1);
-    printf("chunk_y = %d, calc_size = %d at thred %d\n", chunk_size, calc_size, rank);
+    printf("chunk_y = %d, calc_size = %d\n\n", chunk_size, calc_size);
 
     pixel_t* image = (pixel_t *)malloc(calc_size * sizeof(pixel_t));
     //init black image
@@ -126,29 +130,29 @@ int main(int argc, char* argv[])
             /* compute  pixel color and write it to file */
             if (k < maxiter) 
             {
-                int index = (j * (xres - start_y)) + i;
+                int bias = j > start_y ? j : (j - start_y);
+                int index = ((j - start_y) * xres) + i;
                 /* exterior */
-                if (k > 0)
-                {
-                    //set blue color
-                    image[index].blue = min(k, 256);
-                }
-                if (k > 256)
+                image[index].blue = k;
+                image[index].green = k;
+                image[index].red = k;
+                /*
+                if (k > abs(maxiter / 3))
                 {
                     //set red color
-                    image[index].red = min(k-256, 256);
+                    image[index].red = k - abs(maxiter / 3);
                 }
-                if(k > 512)
+                if(k > abs(maxiter / 2))
                 {
                     //set green color
-                    image[index].green = min(k-512, 256);
-                }
+                    image[index].green = k - abs(maxiter / 2);
+                }*/
             };
         }
     }
     printf("Fill send arr\n");
     int* send_arr = (int*)malloc(calc_size * sizeof(int) * 3);
-    printf("Send arr size = %d\n", calc_size * 3);
+    printf("Send arr size = %d\n\n", calc_size * 3);
     for (int i = 0; i < calc_size; i++)
     {
         send_arr[3 * i]     = image[i].red;
@@ -161,9 +165,9 @@ int main(int argc, char* argv[])
     printf("Recv arr size = %d\n", recv_arr_size);
     if(rank == 0)
     {
-        int* recv_arr = (int*)malloc(recv_arr_size * sizeof(int));
+        recv_arr = (int*)malloc(recv_arr_size * sizeof(int));
     }
-    printf("Start mpi gather\n");
+    printf("Start mpi gather\n\n");
     MPI_Gather(send_arr, calc_size * 3, MPI_INT, recv_arr, calc_size * 3, MPI_INT, 0, MPI_COMM_WORLD);
     //recv_arr = send_arr;
     if(rank == 0)
@@ -172,8 +176,8 @@ int main(int argc, char* argv[])
         FILE * fp = fopen("pic.ppm","wb");
         /*write ASCII header to the file*/
         fprintf(fp, "P3\n# Mandelbrot, xmin=%lf, xmax=%lf, ymin=%lf, ymax=%lf, maxiter=%d\n%d %d\n%d\n",
-                xmin, xmax, ymin, ymax, maxiter,
-                xres, yres, 256);
+            xmin, xmax, ymin, ymax, maxiter,
+            xres, yres, maxiter);
 
         
         for (int i = 0; i < recv_arr_size; i+=3)
