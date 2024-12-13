@@ -10,19 +10,36 @@ void swap(int* a, int* b)
     *b = temp;
 }
 
-void bubbleSort(int arr[], int low, int high) 
+void bubble_sort(int* arr, int arr_len, int rank, int size) 
 {
-    for (int i = low; i < high - 1; i++) 
+    int chunk_size = ceil((double)arr_len / size);
+    int start = rank * chunk_size;
+    int end = (rank + 1) * chunk_size - 1;
+    if (end > arr_len)
+        end = arr_len - 1;
+
+    for (int i = 0; i < arr_len - 1; i++)
     {
-        // Last i elements are already in place, so the loop
-        // will only num n - i - 1 times
-        for (int j = low; j < high - i - 1; j++) 
+        if (rank == 1)
         {
+            printf("\n");
+        }
+        for (int j = start; j < end; j++) 
+        {
+            if (rank == 1)
+            {
+                printf("%d %d\t", arr[j], arr[j+1]);
+            }
             if (arr[j] > arr[j + 1])
             {
                 swap(&arr[j], &arr[j + 1]);
             }
         }
+        if (rank == 1)
+        {
+            printf("\n");
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
     }
 }
 
@@ -55,88 +72,89 @@ int partition(int arr[], int low, int high)
     return j;
 }
 
-void quickSort(int arr[], int low, int high) {
-    if (low < high) {
+void quick_sort(int arr[], int low, int high) 
+{
+    if (low < high)
+    {
+        printf("\ninput array: ");
+        for (int i = 0; i < 10; i++)
+        {
+            printf("%d", arr[i]);
+        }
+        int i = low;
+        int j = high;
+        int p = low + (high - low) / 2;
+        int pivot = arr[p];
+        printf("\npivot: %d:%d\n", p, pivot);
+        while (i < j)
+        {
+            while(arr[i] <= pivot && i <= high - 1)
+            {
+                i++;
+            }
 
-        // call partition function to find Partition Index
-        int pi = partition(arr, low, high);
+            while(arr[j] > pivot && j >= low + 1)
+            {
+                j--;
+            }
 
-        // Recursively call quickSort() for left and right
-        // half based on Partition Index
-        quickSort(arr, low, pi - 1);
-        quickSort(arr, pi + 1, high);
+            if(i < j)
+            {
+                printf("swap %d:%d -> %d:%d\n", i, arr[i], j, arr[j]);
+                swap(&arr[i], &arr[j]);
+                for (int k = 0; k < 10; k++)
+                {
+                    printf("%d", arr[k]);
+                }
+                printf("\n");
+            }
+        }
+
+        printf("\nresult array: ");
+        for (int i = 0; i < 10; i++)
+        {
+            printf("%d", arr[i]);
+        }
+        printf("\n");
+        quick_sort(arr, low, j-1);
+        quick_sort(arr, j+1, high);
     }
 }
 
-int main() 
-{
-    int rank, size, chunk_size;
-    double tstart_bubble, tend_bubble, tstart_quick, tend_quick;
 
+int main(int argc, char* argv[])
+{
+    int rank, size;
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    int arr_size = 30000;
-    int* arr1 = (int*)malloc(size * sizeof(int));
-    int* arr2 = (int*)malloc(size * sizeof(int));
-
+    int arr_size = 10;
+    int* arr = (int*)malloc(arr_size * sizeof(int));
+    
     if (rank == 0)
     {
-        for (int i = 0; i < size; i++) 
+        printf("\n");
+        for (int i = 0; i < arr_size; i++)
         {
-            arr1[i] = rand() % size;
-            arr2[i] = rand() % size;
-            chunk_size = ceil((double)arr_size / size);
+            arr[i] = rand() % arr_size;
+            printf("%d", arr[i]);
         }
+        printf("\n");
     }
 
-    MPI_Bcast(&chunk_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&arr1, MPI_INT, arr_size, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&arr2, MPI_INT, arr_size, 0, MPI_COMM_WORLD);
+    MPI_Bcast(arr, arr_size, MPI_INT, 0, MPI_COMM_WORLD);
 
-    //-----------------------------------------
-    //Start acync part
-    MPI_Barrier(MPI_COMM_WORLD);
+    bubble_sort(arr, arr_size, rank, size);
 
-    int start_i = rank * chunk_size;
-    int end_i = (rank+1) * chunk_size;
-    if (end_i > arr_size)
-        end_i = arr_size - 1;
-
-
-    int* sub_arr_bubble = (int*)malloc((end_i - start_i) * sizeof(int));
-    int* sub_arr_quick = (int*)malloc((end_i - start_i) * sizeof(int));
-
-    int index = 0;
-    for (int i = start_i; i < end_i; i++)
+    if (rank == 1)
     {
-        sub_arr_bubble[index] = arr1[i];
-        sub_arr_quick[index] = arr2[i];
-    }
-
-    tstart_bubble = MPI_Wtime();
-    //Bubble sort
-    for (int i = 0; i < arr_size - 1; i++) 
-    {
-    
-        for (int j = low; j < high - i - 1; j++) 
+        for (int i = 0; i < arr_size; i++)
         {
-            if (arr[j] > arr[j + 1])
-            {
-                swap(&arr[j], &arr[j + 1]);
-            }
+            printf("%d", arr[i]);
         }
+        printf("\n");
     }
-
-    // Calling bubble sort on array arr
-    
-    quickSort(arr2, 0, arr_size - 1);
-
-    for (int i = 0; i < arr_size; i++)
-    {
-        printf("%d ", arr1[i]);
-    }
-
+    MPI_Finalize();
     return 0;
 }
