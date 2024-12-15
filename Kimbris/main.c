@@ -14,34 +14,39 @@
 		_a < _b ? _a : _b; })
 
 /**
- * Subtracts an earlier row of the matrix with all later rows that are present in the current process
- * @param recv_id       The ID of the process from which the row was received
- * @param id            ID of current process
- * @param num_eq        The number of equations in the system
- * @param proc_rows     The chunk of the coefficient matrix contained within current process
- * @param proc_vals     The chink of the values vector contained within the current process
- * @param curr          The row to be processed next by the current process
- * @param recvd_row     The complete row that was received
- * @param rows_per_proc The total number of rows present within current process
- * @param num_proc      The total number of processes
- * @param var_perm  	The permutation of variables
+ * Вычитает предыдущую строку матрицы из всех последующих строк, которые присутствуют в текущем процессе.
+ * @param recv_id       ID процесса, с которого была получена строка,
+ * @param id            ID текущего процесса,
+ * @param num_eq        Число уравнений в системе,
+ * @param proc_rows     Подматрица коэффицентов левой части в текущем процессе,
+ * @param proc_vals     Подвектор значений правой части в текущем процессе,
+ * @param curr          Строка, которая будет обработана следующей текущим процессом,
+ * @param recvd_row     Вся полученная строка,
+ * @param rows_per_proc Количество строк в рамках текущего процесса,
+ * @param num_proc      Число процессов,
+ * @param var_perm  	Перестановки переменных.
  */
 void perform_elimination(int recv_id, int id, int num_eq, double* proc_rows, double* proc_vals, int curr, double* recvd_row, int rows_per_proc, int num_proc, int * var_perm) {
-	/* update indices of each variable */
+	// получение индекса ведущего элемента (pivot) в полученной строке
 	int piv_idx = (int) recvd_row[num_eq];
 	int tmp = var_perm[piv_idx];
 	var_perm[piv_idx] = var_perm[recv_id];
 	var_perm[recv_id] = tmp;
 	
 	for(int i = 0; i < rows_per_proc; i++) {
-		if(i*num_proc + id == recv_id) {
+		// пропускаем строку с pivot-элементом, так как её не нужно обрабатывать
+        if(i * num_proc + id == recv_id) {
 			continue;
 		}
-		int piv = (int) recvd_row[num_eq];
-		double tmp = proc_rows[(i * num_eq) + recv_id];
-		proc_rows[(i*num_eq) + recv_id] = proc_rows[(i*num_eq) + piv];
-		proc_rows[(i*num_eq) + piv] = tmp;
+		
+        // получение индекса pivot-элемента
+        int piv = (int) recvd_row[num_eq];
+		// обмен значениями, чтобы учесть перестановку столбцов
+        double tmp = proc_rows[(i * num_eq) + recv_id];
+		proc_rows[(i * num_eq) + recv_id] = proc_rows[(i * num_eq) + piv];
+		proc_rows[(i * num_eq) + piv] = tmp;
 	  
+        // вычитание pivot-элемента, умноженного на коэффициент для формирование нулей
 		if(i >= curr / num_proc) {
 			double piv_val = proc_rows[(i*num_eq) + recv_id];
 			for(int j = 0; j < num_eq; j++) {
@@ -53,24 +58,28 @@ void perform_elimination(int recv_id, int id, int num_eq, double* proc_rows, dou
 }
 
 /**
- * Computes the pivot element of a given row
- * @param curr      The row whose pivot element is to be computed
- * @param proc_rows The number of rows assigned to current process
- * @param num_proc  The total number of processes
- * @param num_eq    The number of equations in the given system
+ * Определение pivot-элемента в строке
+ * @param curr      Индекс строки, в которой нужно найти pivot-элемент,
+ * @param proc_rows Число строк в текущем процессе,
+ * @param num_proc  Общее число процессов,
+ * @param num_eq    Число уравнений в системе,
  *
- * @return The index of the pivot element
+ * @return Индекс pivot-элемента.
  */
 int compute_pivot(int curr, int num_proc, int num_eq, double* proc_rows) {
-	double mx = -1;
-	int pivot;
+	// переменная для хранения максимального значения в строке
+    double mx = -1;
+	// индекс pivot-элемента
+    int pivot;
 	int row_id = curr / num_proc;
 
 	for(int i = curr; i < num_eq; i++) {
 		double val = proc_rows[(row_id * num_eq) + i];
-		if(val < 0)
+		// модуль значения
+        if(val < 0)
 			val *= -1;
-		if(val > mx) {
+		// определение нового максимума
+        if(val > mx) {
 			mx = val;
 			pivot = i;
 		}
@@ -79,275 +88,293 @@ int compute_pivot(int curr, int num_proc, int num_eq, double* proc_rows) {
 }
 
 /**
- * Divides a complete row by the pivot element
- * @param id        	The ID of the current process
- * @param curr      	The row in which division is to be performed
- * @param proc_rows 	The number of rows assigned to current process
- * @param pivot     	Index of the pivot element
- * @param num_proc  	The total number of processes
- * @param num_eq    	The number of equations in the given systemc_vals The chink of the values vector contained within the current process
- * @param rows_per_proc	The number of rows allotted to the process
- * @param proc_vals		The RHS of each equation that is represented by a row
+ * Деление строки на pivot-элемент
+ * @param id        	ID текущего процесса,
+ * @param curr      	Индекс строки, в которой будет происходить деление,
+ * @param proc_rows 	Строка в текущем процессе,
+ * @param pivot     	Индекс pivot-элемента
+ * @param num_proc  	Число процессов
+ * @param num_eq    	Число уравнения в системе, The number of equations in the given systemc_vals The chink of the values vector contained within the current process
+ * @param rows_per_proc	Число строк в процессе
+ * @param proc_vals		Правые части уравнений (представлены в виде одного массива)
  */
 void perform_division(int id, int curr, double* proc_rows, int pivot, int num_proc, int num_eq, int rows_per_proc, double * proc_vals) {
-	/* swapping pivot element with element at pivot index */
 	int row_id = curr / num_proc;
+    // меняем значения в curr и pivot, чтобы выполнить деление
 	double tmp = proc_rows[(row_id * num_eq) + pivot]; 
-	proc_rows[(row_id*num_eq)+ pivot] = proc_rows[(row_id*num_eq) + curr];
-	proc_rows[(row_id*num_eq) + curr] = tmp;
+	proc_rows[(row_id * num_eq) + pivot] = proc_rows[(row_id * num_eq) + curr];
+	proc_rows[(row_id * num_eq) + curr] = tmp;
 	
+    // получаем значение пивота в текущей строке
 	double piv_val = proc_rows[(row_id * num_eq) + curr];
-	for(int i = curr; i < num_eq; i++) {
+	
+    // делим все элементы строки на значение pivot-элемента
+    for(int i = curr; i < num_eq; i++) {
 		proc_rows[(row_id*num_eq) + i] /= piv_val;
 	}
+    // делим все правые части на pivot-элемент
 	proc_vals[row_id] /= piv_val;
 }
 
 int main(int argc, char** argv) {
-	int num_proc; // number of processors
-	int id; // process rank
-	int num_eq = 0; // number of equations
-	int rows_per_proc; // rows allocated to the current process
-	double time_taken; 
+	int num_proc;      // число процессов
+	int id;            // индекс процесса
+	int num_eq = 0;    // число уравнений
+	int rows_per_proc; // число строк на каждый процесс
+	double time_taken; // затраченное время
 
-	/* Initialize MPI */
+	// Инициализация MPI
 	MPI_Init(&argc, &argv);
 
-	/* Get number of processes */
+	// Получение числа процессов
 	MPI_Comm_size(MPI_COMM_WORLD, &num_proc);
 	
-	/* Get current process id */
+	// Получение текущего индекса процесса
 	MPI_Comm_rank(MPI_COMM_WORLD, &id);
 	
-	FILE* inputfp = NULL;
+
+	// Определение потока ввода данных из файла
+    FILE* inputfp = NULL;
 	if(id == 0) {
-		/* read input from file specified in command line arguments */
 		inputfp = fopen(argv[1], "r");
 		
 		/* read number of equations */
 		fscanf(inputfp, "%d", &num_eq);
 	}
 
-	/*
-		Declaring static arrays for equation coefficients.
-		NOTE: num_eq = 0 for processes with rank other than 0, so no memory assigned to them,
-		The memory is assigned only to the root process.
-	*/
+    // Определение массивов для хранения коэффициентов уравнений
 	
-	double eq_mat[num_eq * num_eq]; 	//double eq_mat[num_eq][num_eq]; flattened to 1d
-	double val_mat[num_eq]; 			// Rhs values (y)
+	double eq_mat[num_eq * num_eq]; // матрица коэффициентов левых частей (представлена в виде 1D массива)
+	double val_mat[num_eq]; 	    // вектор правых частей
 
-	/* for flattening */
-	int divs[num_proc]; 	// Number of coefficients per proc
-	int displs[num_proc]; 	// Begining index of coefficients of each process
+	int divs[num_proc];   // число коэффициентов на процесс
+	int displs[num_proc]; // начальные индексы коэффициентов каждого процесса
 
-	time_taken = MPI_Wtime(); // recording start time
+    // Начало параллельных вычислений
+	
+    time_taken = MPI_Wtime();
 
 
-	MPI_Bcast(&num_eq, 1, MPI_INT, 0, MPI_COMM_WORLD); // broadcasted number of equations to all processes
-	int rpp = num_eq / num_proc; // temporary variables
+	MPI_Bcast(&num_eq, 1, MPI_INT, 0, MPI_COMM_WORLD); // Передача числа уравнений на все процессы
+	int rpp = num_eq / num_proc; // Количество строк на процесс по умолчанию 
+                                 // (в случае равномерного распредения строк между процессами)
 	 
-	int np0 = num_proc - (num_eq % num_proc); 	// Number of processes with rows = rpp (np0),
-	int np1 = num_proc - np0; 					// number of processes with rows = rpp + 1(np1)
+	int np0 = num_proc - (num_eq % num_proc); 	// Количество процессов, которым назначено ровно rpp строк
+	int np1 = num_proc - np0; 					// Количество процессов, которым назначено rpp + 1 строк.
 
-	/* assigning rows_per_proc based on the rank */
+	// определение количества строк для текущего процесса
 	if(id >= np1)
 		rows_per_proc = rpp;
 	else
 		rows_per_proc = rpp + 1;
 	
-	/* The permutation of the columns of the current row */
+	// определение массива для перестановок (по умолчанию перестановок нет)
 	int var_perm[num_eq];
 	for(int i = 0; i < num_eq; i++) {
 		var_perm[i] = i;
 	}
 	
-	/* FILE input */
+	// чтение данных из файла на мастер-процессе
 	if(id == 0) {    
 		
-		for(int i = 0; i < num_proc; i++) {
+		// инициализация массива для подсчета количества строк на каждом процессе
+        for(int i = 0; i < num_proc; i++) {
 			divs[i] = 0;
 		}
 		
-		/* iterating over all the rows */
+		// распределение строк между процессами
 		for(int i = 0; i < num_eq; i++) {
 			
-			int assigned_proc = i % num_proc; // process assigned for the current row to be read
+            int assigned_proc = i % num_proc; // определение процесса, которому назначена текущая строка
 			
-			/* calculating the actual position (eff_row) of the row in the partitioned view of rows */
+			// Вычисление фактической позиции строки в разбиении
 			int rows_before = 0; 
 			if(assigned_proc <= np1) {
-				rows_before = (rpp + 1) * (assigned_proc);
+                rows_before = (rpp + 1) * (assigned_proc);
 			} else {
 				rows_before = (rpp + 1) * (np1);
 				rows_before += (assigned_proc - np1)*(rpp);
 			}
-			/* adding the position of the row in the assigned processor */
+
 			int eff_row = rows_before + (divs[assigned_proc]++);
 			
-			/* reading the corresponding coefficients (num_eq + 1) */
+			// Чтение коэффициентов для левой и правой части уравнения
 			for(int j = 0; j < num_eq; j++) {
-				fscanf(inputfp, "%lf", &eq_mat[eff_row*num_eq + j]);
+				fscanf(inputfp, "%lf", &eq_mat[eff_row * num_eq + j]);
 			}
 			fscanf(inputfp, "%lf", &val_mat[eff_row]);
 		}
 
-		/* calculating the displacement vector */
+        // определения вектора смещений
 		displs[0] = 0;
 		for(int i = 1; i < num_proc; i++) {
-			divs[i-1] *= num_eq;
+			divs[i - 1] *= num_eq;
 			displs[i] = displs[i - 1] + divs[i - 1];
 		}
-		divs[num_proc-1] *= num_eq;
+		divs[num_proc - 1] *= num_eq;
 		
+        // закрытие файла
 		fclose(inputfp);
 	}
 
-	/* input read, synchronize at this point */
+	// Ожидание завершения чтения данных всеми процессами.
 	MPI_Barrier(MPI_COMM_WORLD);
 	
-	/* chunk of coefficient matrix per process */
-	double proc_rows[num_eq * rows_per_proc]; // data for the current process
+	// Разбиение данных на чанки (фрагменты) для каждого процесса
+	double proc_rows[num_eq * rows_per_proc]; // данные для текущего процесса (матрица коэффициентов)
+    // Распределение строк матрицы коэффициентов между процессами.
 	MPI_Scatterv(eq_mat, divs, displs, MPI_DOUBLE, proc_rows, rows_per_proc * num_eq, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 	
-	/* chunk of values vector per process */
-	double proc_vals[rows_per_proc]; // y values for the current process
+	// Разбиение значений правых частей на чанки для каждого процесса
+	double proc_vals[rows_per_proc]; // Вектор значений правых частей для текущего процесса
 	for(int i = 0; i < num_proc; i++) {
 		divs[i] /= num_eq;
 		displs[i] /= num_eq;
 	}
 	MPI_Scatterv(val_mat, divs, displs, MPI_DOUBLE, proc_vals, rows_per_proc, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 	
-	/* The process which receives data from the current proc */
+	// Определение процесса, который будет получать данные от текущего процесса
 	int next_proc = (id + 1) % num_proc;
 
-	/* The process which sends the data to the current process */
+	// Определение процесса, который будет отправлять данные текущему процессу
 	int prev_proc = (id - 1 + num_proc) % num_proc;
 	
-	int curr = id; 					// The row which is being processes currently
-	int prev_curr = -1; 			// Id of the previous row
-	int piv; 						// Id of the pivot element in the current row
-	double recvd_row[num_eq + 2]; 	// recvd_row[num_eq] = pivot, recvd_row[num_eq + 1] = y-value
-	MPI_Status st; 					// temoporary status variable
+	int curr = id; 					// текущий процесс обрабатывает строку с индексом id.
+	int prev_curr = -1; 			// индекс предыдущей строки
+	int piv; 						// индекс пивота для текущей строки
+	double recvd_row[num_eq + 2]; 	// массив для хранения строки, полученной от другого процесса + пивот и значение правой части
+	MPI_Status st; 					// переменная для хранения статуса передачи сообщения
 
-	/*************** Upper Triangualar Matrix Generation Phase ***************/
+	/*************** Формирование верхней треугольной матрицы ***************/
 
-	/*   
-		Every process herein will iterate on the rows assigned to it in the sorted order,
-		performing relevant communications in a pipelined manner.
-	*/
-	for(int cnt = 0; cnt < rows_per_proc; cnt++) {
-		/* Iterating over all the rows before the current row and previously processed row, to perform elimination corresponding to that row */
+	// итерация по всем строкам в процессе
+    for(int cnt = 0; cnt < rows_per_proc; cnt++) {
+		// начиная с предыдщей строки по текущую
 		for(int i = prev_curr + 1; i < curr; i++) {
-			// pipelined send receive of all rows between previous row and current row
 			
+            // принимаем коэффициенты левой части, pivot-элемент и правую часть строки
 			MPI_Recv(recvd_row, num_eq + 2, MPI_DOUBLE, prev_proc, i, MPI_COMM_WORLD, &st);
-			/* 
-				The recieved row has traversed (curr - i) number of times, so it it has traversed num_proc or more times, 
-				it has been delivered to all processes 
-				TODO: check this
-			*/
+			
+            // после получения строки от предыдущего процесса, проверяется, не является ли это последней обработанной строкой.
 			if(curr - i < num_proc - 1) {
 				MPI_Send(recvd_row, num_eq + 2, MPI_DOUBLE, next_proc, i, MPI_COMM_WORLD);
 			}
 
-			/* preforming elimination corresponding to the recieved row */
+			// вычитание
 			perform_elimination(i, id, num_eq, proc_rows, proc_vals, curr, recvd_row, rows_per_proc, num_proc, var_perm);
 		}
-		piv = compute_pivot(curr, num_proc, num_eq, proc_rows); 
+		// определение индекса pivot-элемента
+        piv = compute_pivot(curr, num_proc, num_eq, proc_rows); 
 
-		// int tmp = var_perm[piv];
-		// var_perm[piv] = var_perm[curr];
-		// var_perm[curr] = tmp;
-
-		perform_division(id, curr, proc_rows, piv, num_proc, num_eq, rows_per_proc, proc_vals);
+		// деление на pivot-элемент
+        perform_division(id, curr, proc_rows, piv, num_proc, num_eq, rows_per_proc, proc_vals);
 		
+        // Подготовка данных для отправки следующему процессу:
+	    // Заполняем буфер данными для отправки (коэффициенты текущей строки, pivot и правую часть)
 		double send_buf[num_eq + 2];
 		for(int j = 0; j < num_eq; j++) {
 			send_buf[j] = proc_rows[(cnt * num_eq) + j];
 		}
-		send_buf[num_eq] = piv;
-		send_buf[num_eq + 1] = proc_vals[cnt];
+		send_buf[num_eq] = piv; // Добавляем индекс pivot-элемента
+		send_buf[num_eq + 1] = proc_vals[cnt]; // Добавляем правую часть уравнения для текущей строки
 		
-		/* We do not want to send last row */
+		// Отправляем данные следующему процессу, если процессов больше одного
 		if(num_proc > 1) {
 			MPI_Send(send_buf, num_eq + 2, MPI_DOUBLE, next_proc, curr, MPI_COMM_WORLD);
 		}
 
+        // Обновляем индексы текущей и предыдущей строки для дальнейшей обработки
 		prev_curr = curr;
 		curr += num_proc;
 		
+        // Вычитание строк с учётом полученной строки и перемещения pivot-элементов
 		perform_elimination(prev_curr, id, num_eq, proc_rows, proc_vals, curr, send_buf, rows_per_proc, num_proc, var_perm);
 	}
 
-	/**
-		recieving the rows that are not to be processed, but we need it for swapping rows if any
-	*/
+	// Обработка оставшихся строк, которые не будут изменяться, но нужны для обмена с другими процессами
 	for(int i = prev_curr + 1; i < num_eq; i++) {
-		MPI_Recv(recvd_row, num_eq + 2, MPI_DOUBLE, prev_proc, i, MPI_COMM_WORLD, &st);
+		// Получаем строку, которая будет использоваться для обмена
+        MPI_Recv(recvd_row, num_eq + 2, MPI_DOUBLE, prev_proc, i, MPI_COMM_WORLD, &st);
 		
-		if(curr - i < num_proc - 1) { 
+		// Если текущая строка не последняя для обработки, отправляем её следующему процессу
+        if(curr - i < num_proc - 1) { 
 			MPI_Send(recvd_row, num_eq + 2, MPI_DOUBLE, next_proc, i, MPI_COMM_WORLD);
 		}
-
+        // Выполняем вычитание полученной строки
 		perform_elimination(i, id, num_eq, proc_rows, proc_vals, curr, recvd_row, rows_per_proc, num_proc, var_perm);
 	}
 
+    // Ожидаем завершения всех операций обмена данными между процессами
 	MPI_Barrier(MPI_COMM_WORLD);
 
 	/*************** Back Substitution Phase ***************/
 	
-	int lst = id + (rows_per_proc - 1) * num_proc; // actual id of the last row of the current process
-	int prev_lst = num_eq;
-	double x_val;
-	int count = 1;
+    // Вычисление индекса последней строки, которую будет обрабатывать текущий процесс
+	int lst = id + (rows_per_proc - 1) * num_proc;
+	int prev_lst = num_eq; // переменная для отслеживания предыдущей последней строки
+	double x_val; // значение для хранения результата вычислений
+	int count = 1; // количество значений, которое нужно передавать через MPI (в данном случае одно)
 
-	for(int cnt = rows_per_proc - 1; cnt >= 0; cnt--) {
-		for(int i = prev_lst - 1; i > lst; i--) {
-			MPI_Recv(&x_val, count, MPI_DOUBLE, next_proc, i + num_eq, MPI_COMM_WORLD, &st);
+	// Основной цикл обратного хода для решения системы
+    for(int cnt = rows_per_proc - 1; cnt >= 0; cnt--) {
+		// Итерация по всем строкам от последней строки до первой в текущем процессе
+        for(int i = prev_lst - 1; i > lst; i--) {
+			// Получаем значение переменной x из следующего процесса, которое будет использоваться для обратного хода
+            MPI_Recv(&x_val, count, MPI_DOUBLE, next_proc, i + num_eq, MPI_COMM_WORLD, &st);
 			
-			if(i - lst < num_proc - 1) {
+			// Если строка ещё не последняя для обработки, отправляем значение x обратно в предыдущий процесс
+            if(i - lst < num_proc - 1) {
 				MPI_Send(&x_val, count, MPI_DOUBLE, prev_proc, i + num_eq, MPI_COMM_WORLD);
 			}
 			
+            // Вычитание соответствующего элемента из правой части уравнения (процесс обратной подстановки)
 			for(int k = cnt; k >= 0; k--) 
 				proc_vals[k] -= proc_rows[(k * num_eq) + i] * x_val;
 		}
-		double ans = proc_vals[cnt];
+		// Решение для текущей строки после обратного хода
+        double ans = proc_vals[cnt];
 
-		for(int k = cnt - 1; k >= 0; k--)
+		// Обновление правой части уравнения для всех предыдущих строк
+        for(int k = cnt - 1; k >= 0; k--)
 			proc_vals[k] -= proc_rows[(k * num_eq) + lst] * ans;
 		
-		if(lst > 0 && num_proc > 1) {
-			/* We don't want to send first pivot */
+		// Если процесс не является первым, и строки ещё не обработаны, отправляем результат в предыдущий процесс
+        if(lst > 0 && num_proc > 1) {
+			// Не отправляем первый pivot, потому что он не нужен для следующих процессов
 			MPI_Send(&ans, count, MPI_DOUBLE, prev_proc, lst + num_eq, MPI_COMM_WORLD);
 		}
 
+        // Обновление индексов последней строки для следующей итерации
 		prev_lst = lst;
 		lst -= num_proc;
 	}
 
-	double res[num_eq];
+	// Массив для сбора результатов от всех процессов
+    double res[num_eq];
 
-	MPI_Gatherv(proc_vals, rows_per_proc, MPI_DOUBLE, res, divs, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	// Сбор результатов из всех процессов с помощью MPI_Gatherv
+    MPI_Gatherv(proc_vals, rows_per_proc, MPI_DOUBLE, res, divs, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 	
-	if(id == 0) {
+	// Если текущий процесс - главный (id == 0), продолжаем обработку решения
+    if(id == 0) {
 		
-		int k = 0;
+		// Индекс для заполнения массива решения
+        int k = 0;
 		double solution[num_eq];
 		
-		/* arrange data in the sequential format */
+		// Переставляем данные в последовательный формат (глобальный порядок переменных)
 		for(int i = 0; i < num_proc; i++) {
 			for(int j = i; j < num_eq; j += num_proc) {
 				solution[j] = res[k++];
 			}
 		}
 
+        // Массив для хранения конечного решения с учетом перестановки переменных
 		double sol[num_eq];
 		for(int i = 0; i < num_eq; i++) 
 			sol[var_perm[i]] = solution[i];
 		
-		/* print output */
+		// Выводим решение в файл
 		FILE* outfile = fopen("output.txt", "w");
 		fprintf(outfile, "The solution of the system of equations is: \n");
 		for(int i = 0; i < num_eq; i++) {
@@ -356,10 +383,11 @@ int main(int argc, char** argv) {
 		fclose(outfile);
 	}
 	  
-	/* Ensuring that MPI_Finalize() is not called prematurely by any process */
+	// Ожидаем завершения всех операций перед выходом, чтобы MPI_Finalize не был вызван раньше времени
 	MPI_Barrier(MPI_COMM_WORLD); 
 
-	time_taken = MPI_Wtime() - time_taken;
+	// Подсчёт времени выполнения программы
+    time_taken = MPI_Wtime() - time_taken;
 
 	if(id == 0) {
 		printf("Time taken for execution is %lf\n", time_taken);
