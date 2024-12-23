@@ -30,28 +30,26 @@ double*** allocate3D(int x, int y, int z)
     return array;
 }
 
-complex double** allocate2Dcomplex(int n, int m) 
+void clear2d(double** array, int n)
 {
-    complex double** array = (complex double**)malloc(n * sizeof(complex double*));
-    for (int i = 0; i < n; i++) 
+    for (int i = 0; i < n; i++)
     {
-        array[i] = (complex double*)malloc(m * sizeof(complex double));
+        free(array[i]);
     }
-    return array;
+    free(array);
 }
 
-complex double*** allocate3Dcomplex(int x, int y, int z) 
+void clear3d(double*** array, int n)
 {
-    complex double*** array = (complex double***)malloc(x * sizeof(complex double**));
-    for (int i = 0; i < x; i++) 
+    for (int i = 0; i < n; i++)
     {
-        array[i] = (complex double**)malloc(y * sizeof(complex double*));
-        for (int j = 0; j < y; j++) 
+        for (int j = 0; j < n; j++)
         {
-            array[i][j] = (complex double*)malloc(z * sizeof(complex double));
+            free(array[i][j]);
         }
+        free(array[i]);
     }
-    return array;
+    free(array);
 }
 
 void dft(double *input, complex double *output, int N) 
@@ -191,11 +189,17 @@ int main(int argc, char* argv[])
     dft3d(input3d, res3d, start, end, N);
     double end3d = MPI_Wtime();
 
-    double* otput2d = (double*)malloc(N * N * sizeof(double));
-    double* otput3d = (double*)malloc(N * N * N * sizeof(double));
+    double* output2d;
+    double* output3d;
+    if (rank == 0)
+    {
+        output2d = (double*)malloc(N * chunk_size * size * sizeof(double));
+        output3d = (double*)malloc(N * N * chunk_size * size * sizeof(double));
+    }
 
-    MPI_Gather(res2d, N * chunk_size, MPI_DOUBLE, otput2d, N * chunk_size, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Gather(res3d, N * N * chunk_size, MPI_DOUBLE, otput3d, N * N * chunk_size, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Gather(res2d, N * chunk_size, MPI_DOUBLE, output2d, N * chunk_size, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Gather(res3d, N * N * chunk_size, MPI_DOUBLE, output3d, N * N * chunk_size, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    
     if (rank == 0)
     {
         FILE *fp = fopen("output2d.txt","wb");
@@ -206,11 +210,11 @@ int main(int argc, char* argv[])
         {
             for (int j = 0; j < N; j++)
             {
-                fprintf(fp, "%f ", otput2d[idx2d]);
+                fprintf(fp, "%f ", output2d[idx2d]);
                 idx2d++;
                 for (int k = 0; k < N; k++)
                 {
-                    fprintf(fp2, "%f ", otput3d[idx3d]);
+                    fprintf(fp2, "%f ", output3d[idx3d]);
                     idx3d++;
                 }
             }
@@ -220,6 +224,9 @@ int main(int argc, char* argv[])
         fclose(fp);
         fclose(fp2);
 
+        printf("max idx2d = %d\n", idx2d);
+        printf("max idx3d = %d\n", idx3d);
+
         double time2d = end2d - start2d;
         printf("Time taken parallel 2d = %f\n", time2d);
 
@@ -227,6 +234,11 @@ int main(int argc, char* argv[])
         printf("Time taken parallel 3d = %f\n", time3d);
     }
 
+    clear2d(input2d, N);
+    clear3d(input3d, N);
+    free(output2d);
+    free(output3d);
+    MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
     return 0;
 }
