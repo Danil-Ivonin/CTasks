@@ -112,33 +112,37 @@ int main(int argc, char** argv) {
         int* recv_buf = (int*)malloc(num_elements * sizeof(int));
         int* send_buf = (calc_count > 0) ? (int*)malloc(calc_count * sizeof(int)) : NULL;
 
-        for (int i = 0; i < size; i++)
+        for (int l = 0; l < num_diagonals; l++)
         {
-            int p_start = i * chunk_size;
-            int p_end = p_start + chunk_size - 1;
-            if (p_end >= num_elements)
+            for (int i = 0; i < size; i++)
             {
-                p_end = num_elements - 1;
+                int p_start = i * chunk_size;
+                int p_end = p_start + chunk_size - 1;
+                if (p_end >= num_elements)
+                {
+                    p_end = num_elements - 1;
+                }
+                int count = (p_end >= p_start) ? p_end - p_start + 1 : 0;
+                recvcounts[i] = count;
+                displs[i] = (i == 0) ? 0 : displs[i - 1] + recvcounts[i - 1];
             }
-            int count = (p_end >= p_start) ? p_end - p_start + 1 : 0;
-            recvcounts[i] = count;
-            displs[i] = (i == 0) ? 0 : displs[i - 1] + recvcounts[i - 1];
-        }
 
-        // Вычисляем локальную часть диагонали
-        for (int k = local_start; k <= local_end; k++) {
-            int i = start_i - k;
-            int j = start_j + k;
+            // Вычисляем локальную часть диагонали
+            for (int k = local_start; k <= local_end; k++)
+            {
+                int i = start_i - k;
+                int j = start_j + k;
 
-            // Проверяем границы массива
-            if (i < 1 || j < 1 || i > n || j > m) continue;
+                // Проверяем границы массива
+                if (i < 1 || j < 1 || i > n || j > m) continue;
 
-            int match_score = (seq1[i - 1] == seq2[j - 1]) ? MATCH : MISMATCH;
-            send_buf[k - local_start] = max(
-                matrix[i - 1][j - 1] + match_score,
-                matrix[i - 1][j] + GAP,
-                matrix[i][j - 1] + GAP
-            );
+                int match_score = (seq1[i - 1] == seq2[j - 1]) ? MATCH : MISMATCH;
+                send_buf[k - local_start] = max(
+                    matrix[i - 1][j - 1] + match_score,
+                    matrix[i - 1][j] + GAP,
+                    matrix[i][j - 1] + GAP
+                );
+            }
         }
 
         // Синхронизация между процессами
@@ -165,12 +169,68 @@ int main(int argc, char** argv) {
 
     if (rank == 0)
     {
+        // Обратный проход для восстановления выравнивания
+        char aligned_seq1[n + m];
+        char aligned_seq2[n + m];
+        int index1 = 0, index2 = 0;
+
+        int i = n, j = m;
+        while (i > 0 && j > 0) {
+            int current_score = matrix[i][j];
+            int match_score = (seq1[i - 1] == seq2[j - 1]) ? MATCH : MISMATCH;
+
+            if (current_score == matrix[i - 1][j - 1] + match_score) {
+                aligned_seq1[index1++] = seq1[i - 1];
+                aligned_seq2[index2++] = seq2[j - 1];
+                i--;
+                j--;
+            } else if (current_score == matrix[i - 1][j] + GAP) {
+                aligned_seq1[index1++] = seq1[i - 1];
+                aligned_seq2[index2++] = '-';
+                i--;
+            } else {
+                aligned_seq1[index1++] = '-';
+                aligned_seq2[index2++] = seq2[j - 1];
+                j--;
+            }
+        }
+
+        // Добавляем оставшиеся символы
+        while (i > 0) {
+            aligned_seq1[index1++] = seq1[i - 1];
+            aligned_seq2[index2++] = '-';
+            i--;
+        }
+        while (j > 0) {
+            aligned_seq1[index1++] = '-';
+            aligned_seq2[index2++] = seq2[j - 1];
+            j--;
+        }
+
+        // Разворачиваем строки
+        aligned_seq1[index1] = '\0';
+        aligned_seq2[index2] = '\0';
+        for (int k = 0; k < index1 / 2; k++) {
+            char temp = aligned_seq1[k];
+            aligned_seq1[k] = aligned_seq1[index1 - k - 1];
+            aligned_seq1[index1 - k - 1] = temp;
+        }
+        for (int k = 0; k < index2 / 2; k++) {
+            char temp = aligned_seq2[k];
+            aligned_seq2[k] = aligned_seq2[index2 - k - 1];
+            aligned_seq2[index2 - k - 1] = temp;
+        }
+
+        // Вывод результата
+        printf("Итоговое выравнивание:\n%s\n\n%s\n\n", aligned_seq1, aligned_seq2);
+
         printf("Итоговая оценка = %d\n", matrix[n][m]);
-        printf("Время = %f\nДля последовательности длиной %d\n", tend - tstart, n);
+        printf("Время = %f\nДлина последовательности = %d\n", tend - tstart, n);
     }
 
     // Очистка памяти
-    for (int i = 0; i <= n; i++) {
+    for (int i = 0; i <= n; i++)
+    {
         free(matrix[i]);
     }
     free(matrix);
