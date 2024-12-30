@@ -8,8 +8,51 @@
 #define GAP -1
 
 // Функция для вычисления максимума из трех чисел
-int max(int a, int b, int c) {
+int max(int a, int b, int c)
+{
     return (a > b) ? ((a > c) ? a : c) : ((b > c) ? b : c);
+}
+
+void read_sequences(const char* file_name, char** seq1, char** seq2)
+{
+    // Открытие файла
+    FILE *file = fopen(file_name, "r");
+    if (file == NULL)
+    {
+        perror("Ошибка открытия файла");
+        exit(EXIT_FAILURE);
+    }
+
+    // Считывание длины последовательностей
+    int seq_length;
+    if (fscanf(file, "%d", &seq_length) != 1)
+    {
+        perror("Ошибка чтения длины последовательностей");
+        fclose(file);
+        exit(EXIT_FAILURE);
+    }
+
+    // Выделение памяти для seq1 и seq2
+    *seq1 = (char*)malloc((seq_length + 1) * sizeof(char)); // +1 для '\0'
+    *seq2 = (char*)malloc((seq_length + 1) * sizeof(char));
+    if (*seq1 == NULL || *seq2 == NULL)
+    {
+        perror("Ошибка выделения памяти");
+        fclose(file);
+        exit(EXIT_FAILURE);
+    }
+
+    // Считывание последовательностей
+    if (fscanf(file, "%s", *seq1) != 1 || fscanf(file, "%s", *seq2) != 1)
+    {
+        perror("Ошибка чтения последовательностей");
+        free(*seq1);
+        free(*seq2);
+        fclose(file);
+        exit(EXIT_FAILURE);
+    }
+
+    fclose(file);
 }
 
 int main(int argc, char** argv) {
@@ -20,9 +63,12 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    // Входные последовательности
-    char seq1[] = "GCT";
-    char seq2[] = "GCA";
+    char* seq1 = NULL;
+    char* seq2 = NULL;
+    const char* file_name = "sequences.txt";
+
+    // Считываем последовательности из файла
+    read_sequences(file_name, &seq1, &seq2);
 
     int n = strlen(seq1);
     int m = strlen(seq2);
@@ -61,11 +107,11 @@ int main(int argc, char** argv) {
         int local_end = local_start + chunk_size - 1;
         if (local_end >= num_elements) local_end = num_elements - 1;
 
-        int calc_count = local_end - local_start + 1;
+        int calc_count = local_end >= local_start ? local_end - local_start + 1 : 0;
 
         int* recv_buf = (int*)malloc(num_elements * sizeof(int));
-        int* send_buf = (int*)malloc(calc_count * sizeof(int));
-        
+        int* send_buf = (calc_count > 0) ? (int*)malloc(calc_count * sizeof(int)) : NULL;
+
         for (int i = 0; i < size; i++)
         {
             int p_start = i * chunk_size;
@@ -74,27 +120,17 @@ int main(int argc, char** argv) {
             {
                 p_end = num_elements - 1;
             }
-
-            int count = p_end - p_start + 1;
-            count = count > 0 ? count : 0;
-            
+            int count = (p_end >= p_start) ? p_end - p_start + 1 : 0;
             recvcounts[i] = count;
-            if (i == 0)
-            {
-                displs[i] = 0;
-            }
-            else
-            {
-                displs[i] = displs[i-1] + recvcounts[i-1];
-            }
+            displs[i] = (i == 0) ? 0 : displs[i - 1] + recvcounts[i - 1];
         }
-        
-        for (int k = local_start; k <= local_end; k++)
-        {
+
+        // Вычисляем локальную часть диагонали
+        for (int k = local_start; k <= local_end; k++) {
             int i = start_i - k;
             int j = start_j + k;
 
-            // Проверьте границы массива
+            // Проверяем границы массива
             if (i < 1 || j < 1 || i > n || j > m) continue;
 
             int match_score = (seq1[i - 1] == seq2[j - 1]) ? MATCH : MISMATCH;
@@ -105,35 +141,32 @@ int main(int argc, char** argv) {
             );
         }
 
-        
         // Синхронизация между процессами
-        MPI_Barrier(MPI_COMM_WORLD);
-        MPI_Allgatherv(send_buf, calc_count, MPI_INT, recv_buf, recvcounts, displs, MPI_INT, MPI_COMM_WORLD);
-        for (int k = 0; k < num_elements; k++)
-        {
+        MPI_Allgatherv(
+            send_buf, calc_count, MPI_INT,
+            recv_buf, recvcounts, displs, MPI_INT,
+            MPI_COMM_WORLD
+        );
+
+        // Заполняем локальную часть матрицы
+        for (int k = 0; k < num_elements; k++) {
             int i = start_i - k;
             int j = start_j + k;
+            if (i < 1 || j < 1 || i > n || j > m) continue;
             matrix[i][j] = recv_buf[k];
         }
+
+        // Освобождаем временные буферы
+        free(recv_buf);
+        if (send_buf) free(send_buf);
     }
     double tend = MPI_Wtime();
 
-    // Сбор результатов на процесс 0
+
     if (rank == 0)
     {
-        // // Вывод матрицы
-        // printf("Матрица выравнивания:\n");
-        // for (int i = 0; i <= n; i++)
-        // {
-        //     for (int j = 0; j <= m; j++)
-        //     {
-        //         printf("%4d", matrix[i][j]);
-        //     }
-        //     printf("\n");
-        // }
         printf("Итоговая оценка = %d\n", matrix[n][m]);
-        double time_taken_parallel = tend - tstart;
-        printf("Время = %f\nДля последовательности длиной %d\n", time_taken_parallel, n);
+        printf("Время = %f\nДля последовательности длиной %d\n", tend - tstart, n);
     }
 
     // Очистка памяти
@@ -141,6 +174,8 @@ int main(int argc, char** argv) {
         free(matrix[i]);
     }
     free(matrix);
+    free(recvcounts);
+    free(displs);
 
     // Завершение MPI
     MPI_Finalize();
