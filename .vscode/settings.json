@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "format": "c",
+        "initializer_list": "c",
+        "utility": "c",
+        "xstring": "c",
+        "xutility": "c",
+        "type_traits": "c",
+        "cmath": "c"
+    }
+}
